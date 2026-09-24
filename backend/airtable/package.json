@@ -1,0 +1,6 @@
+{
+  "name": "taskboard-airtable-export",
+  "private": true,
+  "scripts": { "test": "node --test export.test.cjs" },
+  "dependencies": { "airtable": "0.12.2" }
+}

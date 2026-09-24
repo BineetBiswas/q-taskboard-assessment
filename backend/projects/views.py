@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.db import connection
 from django.shortcuts import get_object_or_404
+from .airtable_export import export_project_tasks, AirtableExportError
 from users.serializers import UserSerializer
 from .models import Project, Membership, Task
 from .serializers import ProjectDetailSerializer, TaskSerializer, TaskCommentSerializer
@@ -263,5 +264,9 @@ class ExportView(APIView):
         if not _can_edit_tasks(membership.role):
             return Response({'error': 'only admins and members can export'}, status=status.HTTP_403_FORBIDDEN)
 
-        tasks = Task.objects.filter(project_id=project_id).select_related('assignee', 'created_by')
-        return Response({'exported': 0, 'tasks': TaskSerializer(tasks, many=True).data})
+        tasks = Task.objects.filter(project_id=project_id).select_related('assignee').order_by('id')
+        try:
+            result = export_project_tasks(tasks)
+        except AirtableExportError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(result)

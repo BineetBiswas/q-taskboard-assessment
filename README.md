@@ -123,7 +123,46 @@ AIRTABLE_BASE_ID=appXXXXXXXXXXXXXX
 AIRTABLE_TABLE_NAME=Tasks
 ```
 
-The backend uses `pyairtable` for real API calls. `backend/projects/airtable_mock.py` is a test double — use it in unit tests, not in production code.
+The Django endpoint calls `backend/airtable/export.cjs`, which uses the official
+`airtable` npm package. Install Node.js 20+ on the backend host and run
+`npm ci --prefix backend/airtable` from the repository root. Docker installs these
+dependencies automatically; rebuild the backend image after this change.
+
+The three variables above must be available to the Django process. Docker Compose
+passes them from the root `.env`; manual Django startup does not load `.env`
+automatically. Use a personal access token with record read/write permissions for
+the target base. Never put this token in frontend environment variables.
+
+Create these exact Airtable columns before exporting:
+
+| Column | Airtable type |
+| --- | --- |
+| Task ID | Single line text (primary field) |
+| Project ID | Single line text |
+| Title | Single line text |
+| Description | Long text |
+| Status | Single line text |
+| Assignee | Single line text (email) |
+| Updated At | Date with time |
+
+Admins and members can select **Export to Airtable** on the project page. Tasks
+are upserted by Task ID, so repeat exports update existing rows. Keep Task ID
+unique and do not edit it in Airtable. This one-way export does not delete remote
+rows when local tasks are deleted. Clearing an assignee clears its exported email.
+
+Responses contain `attempted`, `exported`, `failed`, `skipped`, and per-task
+`failures`. Individual validation failures are not retried and do not stop later
+tasks. Transient failures get at most three attempts; rate limits wait 30 seconds
+before retrying. Invalid credentials or inaccessible tables stop the export and
+report skipped tasks.
+
+An export of 1,000 tasks takes at least four minutes plus network time. Configure
+your server/proxy timeout to allow up to 20 minutes. If the runner times out, the
+final count is unknown; repeat the export to upsert tasks already written. Avoid
+overlapping exports to reduce rate-limit contention.
+
+Run runner unit tests with `npm test --prefix backend/airtable`. Test doubles live
+only in test files; production always uses the real Airtable client.
 
 ## Tech Stack
 
