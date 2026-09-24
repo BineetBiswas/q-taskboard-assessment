@@ -1,118 +1,101 @@
-# TaskBoard — Project Management App
+# TaskBoard submission
 
-A fullstack project management app for managing projects, tasks, and team members.
+React + TypeScript frontend, Django REST API, PostgreSQL, and a server-side Node Airtable runner.
 
-**Tech Stack:** React 18 + Vite + TypeScript (frontend) · Django 5 + Django REST Framework + SimpleJWT (backend) · PostgreSQL 16
+## Assessment status
 
-## Quick Setup (Docker — Recommended)
+- Part 1: completed. Four issues ranked by business impact in [REVIEW.md](REVIEW.md).
+- Part 2: completed. Parameterized task search fixes the highest-priority SQL injection; regression tests and before/after evidence are included.
+- Part 3a: completed. Task comments with server-side permissions and backend/frontend tests.
+- Part 3b: activity feed intentionally not attempted.
+- Part 3c: completed. Real Airtable integration using the official npm package; test doubles are used only in tests.
+
+Automated results and the Mac Docker deployment check are summarized in
+[TERMINAL_LOG.md](TERMINAL_LOG.md). The final screen recording link and Airtable
+evidence notes are in [RECORDING.md](RECORDING.md).
+
+## Docker setup
+
+From the repository root, create `.env` from `.env.example` if it does not exist.
+Set the database credentials and Django secret key there. Do not commit `.env`.
 
 ```bash
-# Clone and enter the repo
-git clone <repo-url> && cd q-taskboard
-
-# Create .env from .env.example if it does not exist; set database password and secret key.
-# Start all services
-docker-compose up --build
-
-# In a separate terminal, run migrations and seed
-docker-compose exec backend python manage.py migrate
-docker-compose exec backend python manage.py seed
-
-# Run the test suites
-docker-compose exec backend python -m pytest          # Django tests
-docker-compose exec frontend npm test                 # React tests
-
-# The Docker app is now running at http://localhost:13001
-# Docker backend API at http://localhost:18001
+docker compose up --build -d
+docker compose exec backend python manage.py migrate
+# Optional: seed demo users/projects on a fresh database; this deletes existing app data.
+docker compose exec backend python manage.py seed
 ```
 
-## Manual Setup (without Docker)
+Open http://localhost:13001; the API is at http://localhost:18001 on the Docker host.
+For a remote host, use SSH port forwarding to access these loopback-bound ports.
+These ports avoid the local Windows development app on 3000/8000. PostgreSQL is
+internal to Compose. Compose reads `.env`, but intentionally uses `db:5432` inside
+containers and proxies frontend `/api` requests to `backend:8000`.
 
-Requires: Python 3.12+, Node.js 20+, PostgreSQL 15+
+For the Windows-recording rehearsal, the same Docker stack was also verified from
+Windows through the Mac VM-network IP after temporarily exposing the Compose
+ports in that local deployment clone. That port-exposure change was a local
+recording/deployment adjustment, not required for normal submission setup.
+
+The frontend image checks its production build, then runs Vite's development
+server. Django also uses its development server; this is an assessment deployment.
+
+## Manual setup
+
+Requires Python 3.12+, Node.js 20+, and PostgreSQL 15+.
+Create a virtual environment, install dependencies, and load the `.env` values
+into your shell before starting Django (Django does not load that file itself).
+Node must be on the backend process's PATH.
 
 ```bash
-chmod +x bin/setup
-./bin/setup
-
-# Or manually:
-
-# Backend
+# From the repository root, with the Python virtual environment active:
+python -m pip install -r backend/requirements.txt
+npm ci --prefix backend/airtable
+npm ci --prefix frontend
 cd backend
-pip install -r requirements.txt
-cp ../.env.example ../.env   # edit POSTGRES_* if your local setup differs
 python manage.py migrate
-python manage.py seed
-python -m pytest
-
-# Frontend
-cd ../frontend
-npm install
-npm test
-npm run dev
+python manage.py runserver
+# In a second terminal, from the repository root:
+npm run dev --prefix frontend
 ```
 
-## AI Tool Conversation Tracking
+Manual URLs: frontend http://localhost:3000, API http://localhost:8000.
+Demo accounts and their roles are defined in `backend/projects/management/commands/seed.py`.
 
-**This repository is configured to automatically capture your AI coding tool conversation history with each git commit.** This includes conversations from Claude Code, Cursor, Aider, Continue.dev, Cody, Cline, and Windsurf.
-
-This is part of the Ajackus evaluation process. We evaluate how you collaborate with AI tools — your prompting strategy, how you break down problems, and how you review AI suggestions. The captured conversations help us understand your workflow.
-
-**How it works:**
-- A pre-commit git hook runs automatically before each commit
-- It copies conversation files from AI tool directories (e.g., `.claude/`, `.cursor/`) into `.ai-conversations/`
-- These files are staged and included in your commit
-- You don't need to do anything — it happens automatically
-
-**What's captured:** Only AI tool conversation logs stored in the project directory. No system files, browsing history, or anything outside this repository.
-
-**If you prefer a tool that doesn't store local conversations** (like browser-based ChatGPT), the screen recording will capture your interactions instead. No additional action needed from you.
-
-## Seed Data
-
-All user passwords are: `password123`
-
-| Email | Role |
-|-------|------|
-| meera@taskboard.dev | admin on Q3 Launch & Internal Tools, member on Onboarding |
-| arjun@taskboard.dev | admin on Onboarding, member on Q3 Launch |
-| kavya@example.com | member on Q3 Launch |
-| dev@example.com | viewer on Q3 Launch |
-| lina@example.com | member on Onboarding |
-
-## Authentication
+## Tests and build
 
 ```bash
-# Login
-curl -X POST http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"meera@taskboard.dev","password":"password123"}'
-
-# Use the returned token
-curl -H "Authorization: Bearer <token>" http://localhost:8000/api/projects
+# Docker:
+docker compose exec backend python -m pytest -q
+docker compose exec backend npm test --prefix airtable
+docker compose exec frontend npm test -- --run
+docker compose exec frontend npm run build
 ```
 
-## API Endpoints
+Without Docker, run `python -m pytest -q` from `backend` with the database
+environment loaded; from the root run `npm test --prefix backend/airtable`,
+`npm test --prefix frontend -- --run`, and `npm run build --prefix frontend`.
+The PostgreSQL test user needs permission to create a test database.
 
-### Auth
-- `POST /api/auth/register` — Create account
-- `POST /api/auth/login` — Sign in, get JWT
-- `GET /api/users/me` — Current user (authenticated)
+Last observed results: **42 backend tests, 10 Node runner tests, 16 frontend tests,
+and a successful production build**. The production TypeScript check excludes
+`src/tests`; Vitest runs those tests separately.
 
-### Projects
-- `GET /api/projects` — List projects you're a member of (authenticated)
-- `POST /api/projects` — Create a project (authenticated; creator becomes admin)
-- `GET /api/projects/:id` — Project detail with tasks and members (authenticated)
-- `PATCH /api/projects/:id` — Update project (admin only)
-- `DELETE /api/projects/:id` — Delete project (admin only)
+The Mac Docker deployment check also passed: the frontend returned `HTTP 200`
+and the backend returned the expected unauthenticated `HTTP 401` from both the
+Mac host and the Windows VM.
 
-### Tasks
-- `GET /api/projects/:id/tasks` — List tasks in a project; supports `?q=` search (authenticated)
-- `POST /api/projects/:id/tasks` — Create a task (admin or member)
-- `PATCH /api/tasks/:id` — Update a task (authenticated)
-- `DELETE /api/tasks/:id` — Delete a task (admin or member)
+## Feature notes
 
-### Export
-- `POST /api/projects/:id/export` — Export tasks to Airtable (admin or member)
+- Search retains its response shape, case-insensitive matching, wildcard behavior,
+  and ordering while binding user input as SQL parameters.
+- Comments: `GET/POST /api/tasks/:id/comments`. Admins and members can post;
+  viewers can read. Comments show author, body, and time, oldest first, with no
+  comment edit/delete endpoints. The server assigns the author and timestamp.
+- Export: `POST /api/projects/:id/export`. Only admins and members can export;
+  the project page shows progress, counts, and record failures.
+- Review findings 2 and 3 remain open: task-update authorization and the assignee
+  field-name mismatch. See the review for details.
 
 ## Airtable Export (Part 3c)
 
@@ -165,18 +148,12 @@ overlapping exports to reduce rate-limit contention.
 Run runner unit tests with `npm test --prefix backend/airtable`. Test doubles live
 only in test files; production always uses the real Airtable client.
 
-## Tech Stack
+The final recording shows a real export against the configured Airtable base,
+then a second export of the same project to demonstrate Task ID upsert behavior
+rather than duplicate row creation.
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React 18, Vite 5, TypeScript 5 (strict) |
-| Routing | React Router 6 |
-| Data fetching | TanStack Query 5 |
-| Styling | Tailwind CSS 3 |
-| Frontend tests | Vitest 2 + Testing Library |
-| Backend | Django 5, Django REST Framework 3 |
-| Auth | djangorestframework-simplejwt (JWT, 30-day tokens) |
-| ORM | Django ORM |
-| Database | PostgreSQL 16 |
-| Backend tests | pytest-django |
-| Container | Docker + docker-compose |
+## Conversation tracking
+
+The provided repository's pre-commit hook captures supported AI conversation
+files from the project into `.ai-conversations/`. This assessment also uses a
+screen recording. Do not include credentials in documentation or terminal logs.

@@ -1,16 +1,20 @@
 # Code review
 
+These are the four findings from the initial review. References below use current file line numbers; descriptions for resolved findings describe the original behavior. Findings 1 and 4 are now resolved; findings 2 and 3 remain open.
+
 Ranked by business impact: exposure across projects, unauthorized changes, accidental data loss during normal use, then a blocked integration. Reviewed the backend models, views, serializers, routes, authentication, settings, tests, and seed data; the frontend project page, task editor, API client, types, and tests; and setup documentation and configuration.
 
 ## 1. Task search allows SQL injection across projects
 
-- **File and lines:** `backend/projects/views.py:110-120` (`TaskListCreateView.get`).
+- **File and lines:** `backend/projects/views.py:133-148` (`TaskListCreateView.get`).
 - **Category:** Security
 - **Severity:** Critical
 - **Description:** The search text is inserted directly into SQL, so a user can change the query instead of just searching task text. Even a viewer in one project can retrieve tasks belonging to other projects, exposing private work and breaking project isolation.
 - **Recommended fix:** Replace the raw SQL with a project-scoped Django queryset using `Q(title__icontains=q) | Q(description__icontains=q)`. Return results through `TaskSerializer` and add regression tests for injected text, ordinary apostrophes, and isolation between projects.
 
-### Confirmed reproduction
+**Resolution (Part 2):** Bound SQL parameters now keep search input separate from SQL. This smaller fix preserves existing response fields, ordering, and wildcard behavior. Injection and apostrophe tests failed before the fix and passed afterward. Evidence: [before](docs/evidence/bug-before.json), [after](docs/evidence/bug-after.json).
+
+### Confirmed reproduction (before the fix)
 
 Executed against the running local API on 2026-09-24 with the seeded `dev@example.com` account, a viewer of Q3 Launch. No task or project data was changed. The PowerShell commands below obtain a fresh token without printing it; project IDs are from this local database and will change if it is reseeded.
 
@@ -62,7 +66,7 @@ The returned `project_id` matches the project that denied direct access. The inj
 
 ## 2. Task updates do not enforce project permissions
 
-- **File and lines:** `backend/projects/views.py:165-185` (`TaskDetailView.patch`); compare the permission checks at `193-197` for deletion.
+- **File and lines:** `backend/projects/views.py:190-210` (`TaskDetailView.patch`); compare the permission checks at `218-222` for deletion.
 - **Category:** Security
 - **Severity:** High
 - **Description:** The update endpoint loads a task by ID and saves changes without checking project membership or role. Any authenticated user who knows a task ID can change its title, description, status, or assignee, including viewers and users outside the project, undermining the team's task records.
@@ -70,7 +74,7 @@ The returned `project_id` matches the project that denied direct access. The inj
 
 ## 3. Saving an assigned task can silently remove its assignee
 
-- **File and lines:** `backend/projects/serializers.py:8-13,23-25`; `frontend/src/components/TaskDetail.tsx:19,45-52`; `backend/projects/views.py:180-182`. Related contract: `frontend/src/types/index.ts:10-22` and `frontend/src/lib/api-client.ts:38-46`.
+- **File and lines:** `backend/projects/serializers.py:18-23,33-35`; `frontend/src/components/TaskDetail.tsx:21,47-54`; `backend/projects/views.py:205-207`. Related contract: `frontend/src/types/index.ts:10-22` and `frontend/src/lib/api-client.ts:38-46`.
 - **Category:** Data Integrity
 - **Severity:** High
 - **Description:** The API returns `assignee_id`, but the task editor reads `assigneeId`, and the API client does not convert field names. Opening an assigned task therefore initializes the selection as unassigned, and saving an unrelated edit sends `assigneeId: null`, silently removing responsibility for the task.
@@ -78,12 +82,21 @@ The returned `project_id` matches the project that denied direct access. The inj
 
 ## 4. The Airtable export endpoint never exports tasks
 
-- **File and lines:** `backend/projects/views.py:234-243` (`ExportView.post`).
+- **File and lines:** `backend/projects/views.py:259-272` (`ExportView.post`).
 - **Category:** Architecture
 - **Severity:** Medium
 - **Description:** The documented export endpoint only reads local tasks and returns `exported: 0`; it never calls Airtable. Teams cannot transfer their project tasks into Airtable, and the successful HTTP response does not explain that the integration is unimplemented.
-- **Recommended fix:** Add a small, explicit export function that uses the existing `pyairtable` dependency and server-side Airtable configuration to write the project's tasks. Return the confirmed exported count, report configuration and upstream failures clearly, and use a test double only in unit tests.
+- **Recommended fix:** Add a small, explicit export function that uses a real Airtable client and server-side Airtable configuration to write the project's tasks. Return the confirmed exported count, report configuration and upstream failures clearly, and use a test double only in unit tests.
+
+**Resolution (Part 3c):** Django now calls a server-side Node runner using the official `airtable` npm package. It upserts by Task ID, retries transient failures, reports individual failures, and uses test doubles only in tests.
 
 ## Verification scope
 
-Issue 1 was reproduced with real curl requests against the local API. Issues 2-4 were established by tracing the source code; no write requests or external Airtable calls were made, and the automated test suites were not run for this review. This change adds only this review document.
+Issue 1 was reproduced with real curl requests against the local API before the
+fix, then re-run after the fix with an empty task result. Issues 2-4 were
+initially established by source inspection. Later validation passed 42 backend
+tests, 10 Node runner tests, 16 frontend tests, and the production build. The
+Airtable export implementation uses the official client in production; tests use
+doubles only around external Airtable behavior. See [TERMINAL_LOG.md](TERMINAL_LOG.md)
+for the command summary and [RECORDING.md](RECORDING.md) for the final recording
+link and Airtable evidence notes.
