@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, getToken } from "@/lib/api-client";
+import { apiFetch, getToken, getStoredUser } from "@/lib/api-client";
+import { ExportTasks } from "@/components/ExportTasks";
 import { Header } from "@/components/Header";
 import { StatusColumn } from "@/components/StatusColumn";
 import { TaskDetail } from "@/components/TaskDetail";
@@ -41,6 +42,7 @@ export default function ProjectPage() {
   });
 
   const project = data?.project;
+  const role = project?.memberships.find(member => member.user.id === getStoredUser()?.id)?.role;
   const tasksByStatus: Record<TaskStatus, ApiTask[]> = {
     todo: [],
     in_progress: [],
@@ -88,6 +90,7 @@ export default function ProjectPage() {
               </div>
             </div>
 
+            <div className="mb-6"><ExportTasks projectId={project.id} role={role} /></div>
             <section className="bg-surface border border-border rounded-lg p-4 mb-6">
               <h2 className="text-sm font-medium mb-3">add a task</h2>
               <form
