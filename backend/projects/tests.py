@@ -66,6 +66,43 @@ class TestProjects:
 
 @pytest.mark.django_db
 class TestTasks:
+    @pytest.mark.parametrize('query', ["') OR 1=1 -- ", "customer's"])
+    def test_search_treats_quotes_as_data(self, auth_client, user, query):
+        project = Project.objects.create(name='Visible', owner=user)
+        Membership.objects.create(user=user, project=project, role='viewer')
+        matching = Task.objects.create(project=project, title=query, created_by=user)
+        Task.objects.create(project=project, title='Unrelated', created_by=user)
+        other = User.objects.create_user(email='other@example.com', name='Other')
+        private = Project.objects.create(name='Private', owner=other)
+        Task.objects.create(project=private, title=query, created_by=other)
+
+        response = auth_client.get(f'/api/projects/{project.id}/tasks', {'q': query})
+
+        assert response.status_code == 200
+        assert [task['id'] for task in response.json()['tasks']] == [str(matching.id)]
+
+    def test_search_preserves_matching_order_and_response_fields(self, auth_client, user):
+        project = Project.objects.create(name='Visible', owner=user)
+        Membership.objects.create(user=user, project=project, role='viewer')
+        later = Task.objects.create(
+            project=project, title='LAUNCH plan', created_by=user, position=2,
+        )
+        earlier = Task.objects.create(
+            project=project, title='Notes', description='Launch details',
+            created_by=user, position=1,
+        )
+        Task.objects.create(project=project, title='Unrelated', created_by=user)
+
+        response = auth_client.get(f'/api/projects/{project.id}/tasks', {'q': 'launch'})
+
+        assert response.status_code == 200
+        tasks = response.json()['tasks']
+        assert [task['id'] for task in tasks] == [str(earlier.id), str(later.id)]
+        assert set(tasks[0]) == {
+            'id', 'project_id', 'title', 'description', 'status', 'assignee_id',
+            'created_by_id', 'position', 'created_at', 'updated_at',
+        }
+
     def test_create_task(self, auth_client, user):
         project = Project.objects.create(name='P', owner=user)
         Membership.objects.create(user=user, project=project, role='admin')
