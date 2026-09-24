@@ -10,6 +10,7 @@ A fullstack project management app for managing projects, tasks, and team member
 # Clone and enter the repo
 git clone <repo-url> && cd q-taskboard
 
+# Create .env from .env.example if it does not exist; set database password and secret key.
 # Start all services
 docker-compose up --build
 
@@ -21,8 +22,8 @@ docker-compose exec backend python manage.py seed
 docker-compose exec backend python -m pytest          # Django tests
 docker-compose exec frontend npm test                 # React tests
 
-# The app is now running at http://localhost:3000
-# Backend API at http://localhost:8000
+# The Docker app is now running at http://localhost:13001
+# Docker backend API at http://localhost:18001
 ```
 
 ## Manual Setup (without Docker)

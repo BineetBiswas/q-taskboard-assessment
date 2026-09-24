@@ -5,13 +5,10 @@ RUN apt-get update -qq && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
+COPY airtable/package*.json ./airtable/
 RUN cd airtable && npm ci --omit=dev
-
+COPY . .
 EXPOSE 8000
-
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
