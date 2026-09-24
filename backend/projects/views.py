@@ -2,9 +2,31 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.db import connection
+from django.shortcuts import get_object_or_404
 from users.serializers import UserSerializer
 from .models import Project, Membership, Task
-from .serializers import ProjectDetailSerializer, TaskSerializer
+from .serializers import ProjectDetailSerializer, TaskSerializer, TaskCommentSerializer
+
+
+class TaskCommentListCreateView(APIView):
+    # Comments are append-only: this endpoint offers no update or delete methods.
+    def get(self, request, task_id):
+        task = get_object_or_404(Task, id=task_id)
+        if not _get_membership(request.user, task.project_id):
+            return Response({'error': 'forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        comments = task.comments.select_related('author').all()
+        return Response({'comments': TaskCommentSerializer(comments, many=True).data})
+
+    def post(self, request, task_id):
+        task = get_object_or_404(Task, id=task_id)
+        membership = _get_membership(request.user, task.project_id)
+        if not membership or not _can_edit_tasks(membership.role):
+            return Response({'error': 'only admins and members can post comments'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = TaskCommentSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({'error': 'a non-empty comment body is required'}, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save(task=task, author=request.user)
+        return Response({'comment': serializer.data}, status=status.HTTP_201_CREATED)
 
 
 def _get_membership(user, project_id):

@@ -1,7 +1,7 @@
 import pytest
 from rest_framework.test import APIClient
 from users.models import User
-from projects.models import Project, Membership, Task
+from projects.models import Project, Membership, Task, TaskComment
 
 
 @pytest.fixture
@@ -22,6 +22,72 @@ def auth_client(client, user):
     }, format='json')
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['token']}")
     return client
+
+
+@pytest.fixture
+def comment_task(user):
+    project = Project.objects.create(name='Comments', owner=user)
+    return Task.objects.create(project=project, title='Discuss', created_by=user)
+
+
+@pytest.mark.django_db
+class TestTaskComments:
+    @pytest.mark.parametrize('role', ['admin', 'member', 'viewer', None])
+    def test_comment_permissions(self, auth_client, user, comment_task, role):
+        if role:
+            Membership.objects.create(user=user, project=comment_task.project, role=role)
+        url = f'/api/tasks/{comment_task.id}/comments'
+        assert auth_client.get(url).status_code == (200 if role else 403)
+        response = auth_client.post(url, {'body': 'Hello'}, format='json')
+        allowed = role in ('admin', 'member')
+        assert response.status_code == (201 if allowed else 403)
+        assert TaskComment.objects.count() == (1 if allowed else 0)
+
+    def test_author_and_time_are_set_by_server(self, auth_client, user, comment_task):
+        Membership.objects.create(user=user, project=comment_task.project, role='member')
+        response = auth_client.post(f'/api/tasks/{comment_task.id}/comments', {
+            'body': '  Hello  ', 'author': {'id': 'someone-else'},
+            'created_at': '2000-01-01T00:00:00Z',
+        }, format='json')
+        assert response.status_code == 201
+        comment = TaskComment.objects.get()
+        assert comment.author == user
+        assert comment.body == 'Hello'
+        assert comment.created_at.year != 2000
+        assert response.data['comment']['author']['name'] == user.name
+
+    @pytest.mark.parametrize('body', ['', '   ', None, []])
+    def test_invalid_body(self, auth_client, user, comment_task, body):
+        Membership.objects.create(user=user, project=comment_task.project, role='member')
+        response = auth_client.post(f'/api/tasks/{comment_task.id}/comments', {'body': body}, format='json')
+        assert response.status_code == 400
+        assert not TaskComment.objects.exists()
+
+    def test_list_is_chronological_and_task_scoped(self, auth_client, user, comment_task):
+        from datetime import timedelta
+        Membership.objects.create(user=user, project=comment_task.project, role='viewer')
+        later = TaskComment.objects.create(task=comment_task, author=user, body='Later')
+        earlier = TaskComment.objects.create(task=comment_task, author=user, body='Earlier')
+        TaskComment.objects.filter(id=earlier.id).update(created_at=later.created_at - timedelta(minutes=1))
+        other_task = Task.objects.create(project=comment_task.project, title='Other', created_by=user)
+        TaskComment.objects.create(task=other_task, author=user, body='Other task')
+        response = auth_client.get(f'/api/tasks/{comment_task.id}/comments')
+        assert [item['body'] for item in response.data['comments']] == ['Earlier', 'Later']
+
+    @pytest.mark.parametrize('method', ['patch', 'put', 'delete'])
+    def test_comments_cannot_be_changed(self, auth_client, user, comment_task, method):
+        Membership.objects.create(user=user, project=comment_task.project, role='admin')
+        comment = TaskComment.objects.create(task=comment_task, author=user, body='Original')
+        url = f'/api/tasks/{comment_task.id}/comments'
+        assert getattr(auth_client, method)(url, {'body': 'Changed'}, format='json').status_code == 405
+        assert getattr(auth_client, method)(f'{url}/{comment.id}', {'body': 'Changed'}, format='json').status_code == 404
+        comment.refresh_from_db()
+        assert comment.body == 'Original'
+
+    def test_anonymous_access_is_denied(self, client, comment_task):
+        url = f'/api/tasks/{comment_task.id}/comments'
+        assert client.get(url).status_code == 401
+        assert client.post(url, {'body': 'Hello'}, format='json').status_code == 401
 
 
 @pytest.mark.django_db
